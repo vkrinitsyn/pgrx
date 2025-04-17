@@ -581,6 +581,28 @@ impl<'mcx, AllocatedBy: WhoAllocated> PgHeapTuple<'mcx, AllocatedBy> {
             }
         }
     }
+
+    /// SPI_getvalue, Postgres SQL interface to Datum
+    pub fn spi_getvalue(&self, attno: NonZeroUsize) -> Result<Option<String>, TryFromDatumError> {
+        // SPI_getvalue
+        let ptr = unsafe {
+            pg_sys::SPI_getvalue(self.tuple.as_ptr(), self.tupdesc.as_ptr(), attno.get() as i32)
+        };
+        if ptr.is_null() {
+            return match unsafe { pg_sys::SPI_result } {
+                pg_sys::SPI_ERROR_NOATTRIBUTE | pg_sys::SPI_ERROR_NOOUTFUNC => {
+                    Err(TryFromDatumError::NoSuchAttributeNumber(attno))
+                }
+                _ => Ok(None),
+            };
+        }
+        // convert to String
+        let str = unsafe { core::ffi::CStr::from_ptr(ptr) }.to_string_lossy().into_owned();
+        unsafe {
+            pg_sys::pfree(ptr as *mut _);
+        }
+        Ok(Some(str))
+    }
 }
 
 /** Composite type support
